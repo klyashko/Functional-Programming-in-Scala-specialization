@@ -24,8 +24,6 @@ object MOOCSettings extends AutoPlugin {
     name := s"${course.value}-${assignment.value}"
   )
 
-  import autoImport._
-
   object autoImport {
     // Convenient alias
     type CourseraId = ch.epfl.lamp.CourseraId
