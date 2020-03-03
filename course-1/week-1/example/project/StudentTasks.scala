@@ -12,45 +12,9 @@ import scalaj.http._
 import scala.util.{Failure, Success, Try}
 
 /**
- * Provides tasks for submitting the assignment
- */
+  * Provides tasks for submitting the assignment
+  */
 object StudentTasks extends AutoPlugin {
-
-  override lazy val projectSettings = Seq(
-    // Run scalafix linting in parallel with the tests
-    (test in Test) := {
-      scalafixLinting.value
-      (test in Test).value
-    },
-
-    packageSubmissionSetting,
-    submitSetting,
-
-    fork := true,
-    connectInput in run := true,
-    outputStrategy := Some(StdoutOutput),
-    scalafixConfig := {
-      val scalafixDotConf = (baseDirectory.value / ".scalafix.conf")
-      if (scalafixDotConf.exists) Some(scalafixDotConf) else None
-    }
-  ) ++ packageSubmissionZipSettings
-  /** Task to package solution to a given file path */
-  lazy val packageSubmissionSetting = packageSubmission := {
-    // Fail if scalafix linting does not pass.
-    scalafixLinting.value
-
-    val args: Seq[String] = Def.spaceDelimited("[path]").parsed
-    val s: TaskStreams = streams.value // for logging
-    val jar = (packageSubmissionZip in Compile).value
-
-    val base64Jar = prepareJar(jar, s)
-
-    val path = args.headOption.getOrElse((baseDirectory.value / "submission.jar").absolutePath)
-    scala.tools.nsc.io.File(path).writeAll(base64Jar)
-  }
-
-  import MOOCSettings.autoImport._
-  import autoImport._
 
   lazy val submitSetting = submit := {
     // Fail if scalafix linting does not pass.
@@ -216,9 +180,62 @@ object StudentTasks extends AutoPlugin {
     }
 
   }
+  override lazy val projectSettings = Seq(
+    // Run scalafix linting in parallel with the tests
+    (test in Test) := {
+      scalafixLinting.value
+      (test in Test).value
+    },
+
+    packageSubmissionSetting,
+    submitSetting,
+
+    fork := true,
+    connectInput in run := true,
+    outputStrategy := Some(StdoutOutput),
+    scalafixConfig := {
+      val scalafixDotConf = (baseDirectory.value / ".scalafix.conf")
+      if (scalafixDotConf.exists) Some(scalafixDotConf) else None
+    }
+  ) ++ packageSubmissionZipSettings
+
+  import autoImport._
+
+  val maxSubmitFileSize = {
+    val mb = 1024 * 1024
+    10 * mb
+  }
+  /** Task to package solution to a given file path */
+  lazy val packageSubmissionSetting = packageSubmission := {
+    // Fail if scalafix linting does not pass.
+    scalafixLinting.value
+
+    val args: Seq[String] = Def.spaceDelimited("[path]").parsed
+    val s: TaskStreams = streams.value // for logging
+    val jar = (packageSubmissionZip in Compile).value
+
+    val base64Jar = prepareJar(jar, s)
+
+    val path = args.headOption.getOrElse((baseDirectory.value / "submission.jar").absolutePath)
+    scala.tools.nsc.io.File(path).writeAll(base64Jar)
+  }
+  /** Task to submit a solution to coursera */
+  val submit = inputKey[Unit]("submit solution to Coursera")
+  // Run scalafix linting after compilation to avoid seeing parser errors twice
+  // Keep in sync with the use of scalafix in Grader
+  // (--exclude doesn't work (https://github.com/lampepfl-courses/moocs/pull/28#issuecomment-427894795)
+  //  so we customize unmanagedSources below instead)
+  private val scalafixLinting = Def.taskDyn {
+    if (new File(".scalafix.conf").exists()) {
+      (scalafix in Compile).toTask(" --check").dependsOn(compile in Compile)
+    } else Def.task(())
+  }
+
+  override def requires = super.requires && MOOCSettings
+
   /** **********************************************************
-   * SUBMITTING A SOLUTION TO COURSERA
-   */
+    * SUBMITTING A SOLUTION TO COURSERA
+    */
 
   val packageSubmissionZipSettings = Seq(
     packageSubmissionZip := {
@@ -239,27 +256,10 @@ object StudentTasks extends AutoPlugin {
           (mappings in(Compile, packageBin)).value.filterNot { case (_, path) => relativePaths.contains(path) }
         })
     )
-  val maxSubmitFileSize = {
-    val mb = 1024 * 1024
-    10 * mb
-  }
-  /** Task to submit a solution to coursera */
-  val submit = inputKey[Unit]("submit solution to Coursera")
-  // Run scalafix linting after compilation to avoid seeing parser errors twice
-  // Keep in sync with the use of scalafix in Grader
-  // (--exclude doesn't work (https://github.com/lampepfl-courses/moocs/pull/28#issuecomment-427894795)
-  //  so we customize unmanagedSources below instead)
-  private val scalafixLinting = Def.taskDyn {
-    if (new File(".scalafix.conf").exists()) {
-      (scalafix in Compile).toTask(" --check").dependsOn(compile in Compile)
-    } else Def.task(())
-  }
-
-  override def requires = super.requires && MOOCSettings
 
   /** Check that the jar exists, isn't empty, isn't crazy big, and can be read
-   * If so, encode jar as base64 so we can send it to Coursera
-   */
+    * If so, encode jar as base64 so we can send it to Coursera
+    */
   def prepareJar(jar: File, s: TaskStreams): String = {
     val errPrefix = "Error submitting assignment jar: "
     val fileLength = jar.length()
@@ -293,16 +293,16 @@ object StudentTasks extends AutoPlugin {
     }
   }
 
+  /**
+    * *****************
+    * DEALING WITH JARS
+    */
+  def encodeBase64(bytes: Array[Byte]): String =
+    new String(Base64.encodeBase64(bytes))
+
   def failSubmit(): Nothing = {
     sys.error("Submission failed")
   }
-
-  /**
-   * *****************
-   * DEALING WITH JARS
-   */
-  def encodeBase64(bytes: Array[Byte]): String =
-    new String(Base64.encodeBase64(bytes))
 
   object autoImport {
     val packageSourcesOnly = TaskKey[File]("packageSourcesOnly", "Package the sources of the project")
